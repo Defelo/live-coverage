@@ -1,22 +1,31 @@
 import hashlib
+import io
 import runpy
+import shutil
 import sys
 import time
 import webbrowser
 from argparse import ArgumentParser
 from http.server import SimpleHTTPRequestHandler
+from multiprocessing import Process, Lock
 from pathlib import Path
 from socketserver import TCPServer
 from threading import Thread
-from multiprocessing import Process
-from typing import Any
+from typing import Any, BinaryIO
 
 from coverage import Coverage
+from coverage.exceptions import NoDataError
+
+request_lock = Lock()
 
 
 class RequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, directory="htmlcov", **kwargs)  # type: ignore
+
+    def send_head(self) -> io.BytesIO | BinaryIO | None:
+        with request_lock:
+            return super().send_head()
 
     def log_message(self, *_: Any) -> None:
         pass
@@ -24,7 +33,6 @@ class RequestHandler(SimpleHTTPRequestHandler):
 
 def start_server() -> Process:
     def start() -> None:
-        time.sleep(1)
         with TCPServer(("127.0.0.1", 0), RequestHandler) as httpd:
             port = httpd.socket.getsockname()[1]
             webbrowser.open(f"http://localhost:{port}/")
@@ -40,11 +48,11 @@ def update_script(data_hash: str) -> None:
     content = file.read_text()
     content = f"""const HASH = "{data_hash}";\n\n""" + content
     content += """
-    setInterval(() => {
+    const interval = setInterval(() => {
         fetch(location.origin + "/coverage_html.js").then(r => r.text()).then(r => {
             const new_hash = r.split('"')[1];
             if (new_hash !== HASH) location.reload();
-        });
+        }).catch(() => clearInterval(interval));
     }, 1000);
     """
     file.write_text(content)
@@ -59,8 +67,10 @@ def main() -> None:
 
     parser = ArgumentParser()
     parser.add_argument("-a", "--append", action="store_true", help="Append coverage data instead of starting clean")
-    parser.add_argument("--branch", action="store_true", help="Measure branch coverage")
-    parser.add_argument("--timid", action="store_true", help="Use simpler trace method")
+    parser.add_argument("-b", "--branch", action="store_true", help="Measure branch coverage")
+    parser.add_argument("-c", "--clean", action="store_true", help="Remove htmlcov/")
+    parser.add_argument("-s", "--save", action="store_true", help="Save data to .coverage")
+    parser.add_argument("-t", "--timid", action="store_true", help="Use simpler trace method")
     parser.add_argument("file", type=get_file, help="Python program file")
     args = parser.parse_args()
 
@@ -69,11 +79,32 @@ def main() -> None:
     cov = Coverage(auto_data=args.append, timid=args.timid, branch=args.branch, omit=[__file__])
 
     def update_coverage() -> None:
-        while cov._started:  # noqa
-            time.sleep(1)
-            cov.save()
-            cov.html_report()
-            update_script(hashlib.sha256(cov.get_data().dumps()).hexdigest())
+        time.sleep(1)
+        last: float = 0
+        last_data_hash = ""
+        while True:
+            now = time.time()
+            time.sleep(max(last + 1 - now, 0))
+            last = now
+            if not cov._started:  # noqa
+                break
+
+            data_hash = hashlib.sha256(cov.get_data().dumps()).hexdigest()
+            if data_hash == last_data_hash:
+                continue
+
+            with request_lock:
+                try:
+                    cov.html_report()
+                except NoDataError:
+                    continue
+                update_script(data_hash)
+            last_data_hash = data_hash
+
+    path = Path("htmlcov/index.html")
+    if not path.exists():
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("""<html><head><meta http-equiv="refresh" content="1"></head><body></body></html>""")
 
     cov.start()
     thread = Thread(target=update_coverage)
@@ -87,12 +118,15 @@ def main() -> None:
         cov.stop()
         thread.join()
 
-        cov.save()
-        cov.html_report()
+        if args.save:
+            cov.save()
+
         cov.report()
 
-        webbrowser.open("htmlcov/index.html")
-
-        time.sleep(3)
-
         server.kill()
+
+        if args.clean:
+            shutil.rmtree("htmlcov")
+        else:
+            cov.html_report()
+            webbrowser.open("htmlcov/index.html")
