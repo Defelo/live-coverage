@@ -127,10 +127,8 @@ jobs:
           name: build
           path: dist
 
-      - name: Setup poetry
-        run: |
-          pip install poetry
-          poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
+      - name: Install Twine
+        run: pip install twine
 
       - name: Upload package to PyPi
-        run: poetry publish
+        run: python -m twine upload -u __token__ -p ${{ secrets.PYPI_TOKEN }} dist/*
