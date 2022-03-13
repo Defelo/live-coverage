@@ -59,8 +59,8 @@ def update_script(data_hash: str) -> None:
 
 
 def main() -> None:
-    def get_file(path: str) -> Path:
-        out = Path(path)
+    def get_file(p: str) -> Path:
+        out = Path(p)
         if not out.is_file():
             raise ValueError
         return out
@@ -97,9 +97,10 @@ def main() -> None:
                 try:
                     cov.html_report()
                 except NoDataError:
-                    continue
-                update_script(data_hash)
-            last_data_hash = data_hash
+                    pass
+                else:
+                    update_script(data_hash)
+                    last_data_hash = data_hash
 
     path = Path("htmlcov/index.html")
     if not path.exists():

@@ -1,12 +1,13 @@
 [tool.poetry]
 name = "live-coverage"
-version = "0.0.2"
+version = "0.0.3"
 description = "Live Code Coverage for Python"
 authors = ["Defelo <elodef42@gmail.com>"]
 readme = "README.md"
 license = "GPL-3.0-only"
 homepage = "https://github.com/Defelo/live-coverage"
 repository = "https://github.com/Defelo/live-coverage"
+build = "_build.py"
 
 [tool.poetry.dependencies]
 python = "^3.10"
